@@ -1,28 +1,39 @@
-import {Request, Response} from "express";
-import {Transactions} from "../models/Transaction";
+import {Request, response, Response} from "express";
+import { Transactions } from "../models/Transaction";
+import { ITransaction } from "../entities/ITransaction";
+import {Users} from "../models/User";
+import R from "ramda";
+import { v4 as uuid } from "uuid";
 
 class TransactionController {
     public async index(req: Request, res: Response): Promise<Response> {
-        const transactions = await Transactions.find()
+        const transactions = await Transactions.find({ deleted: false }).exec()
 
         return res.status(200).json(transactions)
     }
 
     public async create(req: Request, res: Response): Promise<Response> {
-        const newTransaction = await Transactions.create(req.body)
+        const newTransaction: ITransaction = req.body
 
-        return res.status(200).json(newTransaction)
-    }
+        const user = await Users.findOne({ id: newTransaction.user_id }).exec()
 
-    public async update(req: Request, res: Response): Promise<Response> {
-        const newData = req.body
-        const idTransaction = req.params.id.toString()
+        if (R.isNil(user)) {
+            return res.status(400).json({ message: "This User not exists" })
+        }
 
-        const filter = { id: idTransaction }
+        if (newTransaction.amount > user.availableValue) {
+            return res.status(400).json({ message: "This User dont have balance" })
+        }
 
-        let doc = await Transactions.findOneAndUpdate(filter, newData, { new: true })
+        if (newTransaction.amount <= 0) {
+            return res.status(400).json({ message: "Wrong fields" })
+        }
 
-        return res.status(200).json(doc)
+        await user.update({ availableValue: user.availableValue - newTransaction.amount });
+
+        const transaction = await Transactions.create({ ...newTransaction, id: uuid(), user_balance: user.availableValue - newTransaction.amount });
+
+        return res.status(201).json(transaction);
     }
 
     public async findById(req: Request, res: Response) {
@@ -33,17 +44,14 @@ class TransactionController {
         return res.status(200).json(transaction)
     }
 
-    public async delete(req: Request, res: Response) {
-        const idTransaction = req.params.id.toString()
+    public async findTransactionForUser(req: Request, res: Response) {
+        const idUser = req.params.user_id.toString()
 
-        const transaction = await Transactions.findOne({ id: idTransaction }).exec()
+        const transactions = await Transactions.find({ user_id: idUser }).exec()
 
-        if(transaction != null) {
-            await transaction.remove()
-            return res.status(200).json({ message: "transaction removed" })
-        }
-        return res.send("F")
+        return res.status(200).json(transactions)
     }
+
 }
 
 export default new TransactionController()
